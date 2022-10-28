@@ -41,7 +41,7 @@ fetch_coaches_games <- function() {
     mutate(Season = as.numeric(substr(game,nchar(game)-3,nchar(game)))) %>%
     mutate(Round = str_replace(sub(",.*","",game), "R", "")) %>% 
     mutate(Crowd = as.integer(crowd), Game_Number = as.integer(number), Margin = as.integer(m)) %>% 
-    select(Coach_ID, Coach, Game_Number, Season, Round, Team = team, Team_Score = tot, Oppo = team_2, Oppo_Score = tot_2,Venue = venue, Result = r, Margin)
+    select(Coach_ID, Coach, Game_Number, Season, Round, Team = team, Team_Score = tot, Oppo = team_2, Oppo_Score = tot_2,Venue = venue, Result = r, Margin, Crowd)
   
   return(data)
 }
