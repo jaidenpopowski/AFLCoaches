@@ -1,71 +1,40 @@
 library(dplyr)
 library(fitzRoy)
 library(stringr)
-library(janitor)
-library(xml2)
 library(rvest)
 
 # Function to get all the coach URLs and return their games
 fetch_coaches_games <- function() {
   # Coaches Main index from AFL Tables link
-  coaches.main <- read_html(x = "https://afltables.com/afl/stats/coaches/coaches_idx.html")
+  coaches.index <- read_html(x = "https://afltables.com/afl/stats/coaches/coaches_idx.html")
   
-  names <- coaches.main %>%
-    html_nodes("a") %>%
-    html_text()
+  coaches <- data.frame(urls = coaches.index %>%
+    html_nodes("table") %>% 
+    .[[1]] %>% 
+    html_nodes("a") %>% 
+    html_attr("href")) %>% 
+    mutate(urls = str_replace(urls," ","%20")) # fix Allan La Fontaine link
   
-  urls <- coaches.main %>%
-    html_nodes("a") %>%
-    html_attr("href")
+  message(paste("Getting matches for", length(coaches$urls), "coaches")) # print start message
   
-  coach.names <- data.frame(cbind(names, urls)) %>% # combine them into dataframe
-    filter(grepl(",",names)) %>% # only keep links for coach names
-    distinct() %>% # remove 'Most Games as Player/Coach' table links
-    mutate(urls = str_replace(urls, " ", "%20")) # fix Allan La Fontaine link
-  
-  message(paste("Getting matches for", length(coach.names$urls), "coaches")) # print start message
-  
-  pb <- progress_estimated(length(coach.names$urls))  # Create progress bar
+  pb <- suppressWarnings(progress_estimated(length(coaches$urls)))  # Create progress bar
 
-  tables <- coach.names$urls %>%
+  games_list <- coaches$urls %>%
     purrr::map_df(~ {
       pb$tick()$print() # progress bar updates
-      get_individual(.x) # scrape individual coach URLs
-    })
-  message("\nDone!") # Hooray!
+      read_html(x = paste0("http://afltables.com/afl/stats/coaches/", .x)) %>%  # read coach page
+        html_nodes("tbody") %>% # find table elements
+        .[[length(.)]] %>% 
+        html_table() # scrape individual coach URLs
+    }) %>% 
+    mutate(Coach_ID = cumsum(X1 == "1")) %>% 
+    mutate(Coach = str_replace_all(coaches$urls[Coach_ID], c("_"=" ","%20"=" ", "0" = "", "1"="", "2"="", ".html"=""))) %>% # coach names
+    mutate(Crowd = as.integer(X12), Game_Number = as.integer(X1), Margin = as.integer(X10)) %>% 
+    mutate(Season = as.numeric(substr(X2,nchar(X2)-3,nchar(X2)))) %>%
+    mutate(Round = str_replace(sub(",.*","",X2), "R", "")) %>%
+    select(Coach_ID, Coach, Game_Number, Season, Round, Venue = X11,Team = X4, Team_Score = X6, Oppo = X7, Oppo_Score = X9, Result = X3, Margin, Crowd)
   
-  data <- tables %>%
-    mutate(Coach_ID = cumsum(number == "1")) %>%
-    left_join(mutate(coach.names, Coach_ID = row_number()),by="Coach_ID") %>%
-    mutate(Coach = str_replace_all(urls, c("_"=" ","%20"=" ", "0" = "", "1"="", "2"="", ".html"=""))) %>% # remove other characters to give coach names
-    mutate(Season = as.numeric(substr(game,nchar(game)-3,nchar(game)))) %>%
-    mutate(Round = str_replace(sub(",.*","",game), "R", "")) %>% 
-    mutate(Crowd = as.integer(crowd), Game_Number = as.integer(number), Margin = as.integer(m)) %>% 
-    select(Coach_ID, Coach, Game_Number, Season, Round, Team = team, Team_Score = tot, Oppo = team_2, Oppo_Score = tot_2,Venue = venue, Result = r, Margin, Crowd)
-  
-  return(data)
-}
-
-# Function to retrieve the table for an individual coach
-get_individual <- function(x) {
-  individual_page <- read_html(x = paste0("http://afltables.com/afl/stats/coaches/", x)) # read coach page
-  
-  # Find table
-  table.name <- "" # table names on page, initialised as nothing
-  i <- 0 # counter
-  
-  while (table.name != "Games Coached") { # check through all tables on coach page 
-    i <- i + 1
-    games_list <- individual_page %>% # scrape a table
-      html_nodes(xpath = paste("/html/body/center/table[", i, "]", sep = "")) %>%
-      html_table(fill = TRUE)
-    games_list <- games_list[[1]] # save the data
-    table.name <- names(games_list[1]) # update table name
-  }
-  games_list <- suppressWarnings(janitor::row_to_names(games_list, row_number = 1)) %>% # set column names as first row (duplicates cause warnings)
-    janitor::clean_names() # clean column names to remove duplicates
-  
-  return(games_list) # return coach games list
+  return(games_list)
 }
 
 coaches_raw <- fetch_coaches_games()
